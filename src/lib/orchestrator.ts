@@ -10,12 +10,26 @@ import { verifyRedline } from "./agents/verifier";
 import { coachNegotiation } from "./agents/negotiation-coach";
 import { ClauseReviewResult, ContractReviewResult, EvidenceItem, ProgressEvent } from "./types";
 
+async function cleanupPreviousReview(contractId: string) {
+  // Remove old reviews and related data for re-review scenarios
+  const oldReviews = await ClauseReview.find({ contractId }).select("_id").lean();
+  if (oldReviews.length > 0) {
+    const reviewIds = oldReviews.map(r => r._id.toString());
+    await EvidenceSource.deleteMany({ clauseReviewId: { $in: reviewIds } });
+    await RedlineSuggestion.deleteMany({ clauseReviewId: { $in: reviewIds } });
+    await NegotiationRecommendation.deleteMany({ clauseReviewId: { $in: reviewIds } });
+    await ClauseReview.deleteMany({ contractId });
+  }
+  await AgentRun.deleteMany({ contractId });
+}
+
 export async function runFullReview(contractId: string, onProgress?: (event: ProgressEvent) => void): Promise<ContractReviewResult> {
   function emit(agent: string, label: string, status: ProgressEvent["status"], message?: string, total?: number, current?: number) {
     onProgress?.({ agent, label, status, message, total, current });
   }
 
   await connectDB();
+  await cleanupPreviousReview(contractId);
   await Contract.findByIdAndUpdate(contractId, { status: "REVIEWING" });
 
   emit("ingestion", "Ingesting contract", "running");
